@@ -86,6 +86,7 @@ func readConnReq(conn net.Conn) (*TConnReq, error) {
 	connReq := &TConnReq{}
 	buf2 := readBytes(conn, 2)
 	if buf2[0] != Sock5Version {
+		log.Error("[]byte = %v", buf2)
 		panic("invalid version number")
 	}
 
@@ -127,6 +128,7 @@ func readConnDetailReq(conn net.Conn) (*TConnDetailReq, string, error) {
 	connDetailReq := &TConnDetailReq{}
 	buf4 := readBytes(conn, 4)
 	if buf4[0] != Sock5Version {
+		log.Error("[]byte = %v", buf4)
 		panic("invalid version number")
 	}
 	if buf4[2] != Sock5Rsv {
