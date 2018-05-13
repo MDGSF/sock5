@@ -82,46 +82,31 @@ const (
 	ConnDetailRspAtypIPV6       = 0x04
 )
 
-func readConnReq(conn net.Conn) (*TConnReq, error) {
-	connReq := &TConnReq{}
+func readConnReq(conn net.Conn) error {
+	//see protocol TConnReq{}
 	buf2 := readBytes(conn, 2)
 	if buf2[0] != Sock5Version {
 		log.Error("[]byte = %v", buf2)
 		panic("invalid version number")
 	}
+	//buf2[0] is version number.
+	//buf2[1] is the number of methods.
 
-	connReq.Ver = buf2[0]
-	connReq.NMethods = buf2[1]
-
-	buf3 := readBytes(conn, int(connReq.NMethods))
-	connReq.Methods = buf3
+	// buf3 is methods array, one method is one byte.
+	buf3 := readBytes(conn, int(buf2[1]))
 
 	support := false
-	for _, method := range connReq.Methods {
+	for _, method := range buf3 {
 		if method == ConnMethodNoAuth {
 			support = true
 			break
 		}
 	}
 	if !support {
-		return nil, errors.New("don't support")
+		return errors.New("don't support")
 	}
 
-	return connReq, nil
-}
-
-func writeConnRspFailed(conn net.Conn) {
-	connRsp := &TConnRsp{}
-	connRsp.Ver = Sock5Version
-	connRsp.Method = ConnMethodNoAcceptMethods
-	conn.Write([]byte{connRsp.Ver, connRsp.Method})
-}
-
-func writeConnRspSuccess(conn net.Conn) {
-	connRsp := &TConnRsp{}
-	connRsp.Ver = Sock5Version
-	connRsp.Method = ConnMethodNoAuth
-	conn.Write([]byte{connRsp.Ver, connRsp.Method})
+	return nil
 }
 
 func readConnDetailReq(conn net.Conn) (*TConnDetailReq, string, error) {
@@ -228,7 +213,7 @@ func iobridge(src io.Reader, dst io.Writer, shutdown chan bool) {
 		shutdown <- true
 	}()
 
-	buf := make([]byte, 8*1024)
+	buf := make([]byte, 8192)
 	for {
 		n, err := src.Read(buf)
 		if err != nil {
@@ -253,12 +238,13 @@ func handleConn(conn net.Conn) {
 		log.Info("close conn: %v, %v", conn.RemoteAddr().Network(), conn.RemoteAddr().String())
 	}()
 
-	_, err := readConnReq(conn)
-	if err != nil {
-		writeConnRspFailed(conn)
+	if err := readConnReq(conn); err != nil {
+		//writeConnRspFailed(conn), see protocol TConnRsp{}
+		conn.Write([]byte{Sock5Version, ConnMethodNoAcceptMethods})
 		return
 	}
-	writeConnRspSuccess(conn)
+	//writeConnRspSuccess(conn), see protocol TConnRsp{}
+	conn.Write([]byte{Sock5Version, ConnMethodNoAuth})
 
 	_, backenAddr, err := readConnDetailReq(conn)
 	if err != nil {
