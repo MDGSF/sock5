@@ -8,7 +8,9 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
+	"github.com/MDGSF/utils"
 	"github.com/MDGSF/utils/log"
 )
 
@@ -208,34 +210,32 @@ func readBytes(conn io.Reader, count int) []byte {
 	return buf
 }
 
-func iobridge(src io.Reader, dst io.Writer, shutdown chan bool) {
-	defer func() {
-		shutdown <- true
-	}()
-
-	buf := make([]byte, 8192)
+func iobridge(src io.Reader, dst io.Writer) {
+	buf := utils.GLeakyBuf.Get()
+	defer utils.GLeakyBuf.Put(buf)
 	for {
 		n, err := src.Read(buf)
-		if err != nil {
+		if err != nil || n == 0 {
 			log.Error("read failed, err = %v", err)
-			break
+			return
 		}
+
 		_, err = dst.Write(buf[:n])
 		if err != nil {
 			log.Error("write failed, err = %v", err)
-			break
+			return
 		}
 	}
 }
 
 func handleConn(conn net.Conn) {
-	log.Info("accept new conn: %v, %v", conn.RemoteAddr().Network(), conn.RemoteAddr().String())
+	log.Info("accept new conn: %v, %v, %v", conn.RemoteAddr().Network(), conn.RemoteAddr().String(), atomic.AddInt32(&connectionNumber, 1))
 	defer func() {
 		if err := recover(); err != nil {
 			log.Error("%v, %v, err = %v", conn.RemoteAddr().Network(), conn.RemoteAddr().String(), err)
 		}
 		conn.Close()
-		log.Info("close conn: %v, %v", conn.RemoteAddr().Network(), conn.RemoteAddr().String())
+		log.Info("close conn: %v, %v, %v", conn.RemoteAddr().Network(), conn.RemoteAddr().String(), atomic.AddInt32(&connectionNumber, -1))
 	}()
 
 	if err := readConnReq(conn); err != nil {
@@ -267,11 +267,11 @@ func handleConn(conn net.Conn) {
 
 	writeConnDetailRspSuccess(conn, backconn.RemoteAddr().String())
 
-	shutdown := make(chan bool, 2)
-	go iobridge(conn, backconn, shutdown)
-	go iobridge(backconn, conn, shutdown)
-	<-shutdown
+	go iobridge(conn, backconn)
+	iobridge(backconn, conn)
 }
+
+var connectionNumber int32
 
 func main() {
 	addr := flag.String("addr", ":1080", "localhost:1080")
